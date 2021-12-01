@@ -1,4 +1,6 @@
 # Build and Release Folders
+credentials.h
+target
 bin-debug/
 bin-release/
 [Oo]bj/
