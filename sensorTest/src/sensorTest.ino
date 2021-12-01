@@ -7,48 +7,95 @@
 
 //DEV Branch
 
+
+
 #include <OneWire.h>
 #include "DS18.h"
-
-DS18 tempSensor(18);
+#include <Adafruit_MQTT.h>
+#include "Adafruit_MQTT/Adafruit_MQTT.h" 
+#include "Adafruit_MQTT/Adafruit_MQTT_SPARK.h" 
+#include <Adafruit_BME280.h>
+#include <credentials.h>
 
 const int PHpin = 19;
+const int TempPin = 18;
 const int TDSpin = 17;
+const int pHRelayPin = 10;
+const int nutrientRelayPin = 11;
 
-#define VREF 5.0      // analog reference voltage(Volt) of the ADC
-#define SCOUNT  30           // sum of sample point
-int analogBuffer[SCOUNT];    // store the analog value in the array, read from ADC
+Adafruit_BME280 bme;
+DS18 tempSensor(TempPin);
+TCPClient TheClient; 
+Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY);
+
+Adafruit_MQTT_Publish TDSfeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/hydroponic-data.tdsfeed");
+Adafruit_MQTT_Publish pHfeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/hydroponic-data.phfeed");
+Adafruit_MQTT_Publish wetTempFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/hydroponic-data.wettempfeed");
+Adafruit_MQTT_Publish airTempFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/hydroponic-data.airtempfeed");
+Adafruit_MQTT_Publish airPressureFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/hydroponic-data.airpressurefeed");
+Adafruit_MQTT_Publish airHumidityFeed = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/hydroponic-data.airhumidityfeed");
+
+Adafruit_MQTT_Subscribe pHdown = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/hydroponic-data.phdown");
+Adafruit_MQTT_Subscribe nutrientAdd = Adafruit_MQTT_Subscribe(&mqtt, AIO_USERNAME "/feeds/hydroponic-data.nutrientadd");
+
+#define VREF 5.0      
+#define SCOUNT  30          
+int analogBuffer[SCOUNT];    
 int analogBufferTemp[SCOUNT];
 int analogBufferIndex = 0, copyIndex = 0;
-float averageVoltage = 0, tdsValue = 0, Celsius = 0, Fahrenheit = 0, temperature = 25;
+float averageVoltage = 0, tdsValue = 0, temperature = 25;
+float tempC, tempF, pressPA, pressInHg, relHumid;
+
+
+float pH;
+
+unsigned long last, lastUpdate;
 
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
 void setup() {
+  WiFi.connect();
   Serial.begin(9600);
+  mqtt.subscribe(&pHdown);
+  mqtt.subscribe(&nutrientAdd);
   pinMode(PHpin, INPUT);
   pinMode(TDSpin, INPUT);
+  bme.begin();  
 }
 void loop() {
-  // PHsensor();
-  // TDSsensor();
-  getTemp();
+
+  MQTT_connect();
+
+  //TDSsensor();
+  PHsensor();
+  //bmeCheck();
+
+  if((millis()-lastUpdate)>30000){
+    mqttUpdate();
+    lastUpdate = millis();
+  }
+
+  mqttPing();
+
 }
 
-void PHsensor () { // need to adjust, average to get better readings
+void PHsensor () { // After seemingly working well yesterday, readings are all over the place today. 
   int SAMPLES = 5000;
-  int sensorValue, i;
-  float pH;
-  for (i=0; i<SAMPLES; i++) {
+  int sensorValue = 0;
+  long sensorSum = 0;
+  float sensorAverage = 0;
+  //Serial.printf("pHread = %i\n", analogRead(PHpin));
+  for (int i=0; i<SAMPLES; i++) {
     sensorValue = analogRead(PHpin);
-    sensorValue += sensorValue;
+    sensorSum += sensorValue;
   }
-  sensorValue = sensorValue/SAMPLES;
-  pH = 0.008*sensorValue+24.8;
-  Serial.printf("sensorData = %i, pH = %f\n", sensorValue, pH);
+  sensorAverage = sensorSum/SAMPLES;
+  pH = ((0.008*sensorAverage)+24.8);
+  Serial.printf("Water pH = %.3f, pHsensorData = %f\n", pH, sensorAverage);
 }
 
 void TDSsensor () {   // Readings are in range, but need calibration
+
   static unsigned long analogSampleTimepoint = millis();
   if (millis() - analogSampleTimepoint > 40U) {  //every 40 milliseconds,read the analog value from the ADC 
     analogSampleTimepoint = millis();
@@ -70,7 +117,7 @@ void TDSsensor () {   // Readings are in range, but need calibration
     //Serial.print("voltage:");
     //Serial.print(averageVoltage,2);
     //Serial.print("V   ");
-    Serial.print("TDS----Value:");
+    Serial.print("TDS-Value:");
     Serial.print(tdsValue, 0);
     Serial.println("ppm");
   }
@@ -98,8 +145,104 @@ int getMedianNum(int bArray[], int iFilterLen) {
   return bTemp;
 }
 
-void getTemp () {
-  if (tempSensor.read()) {
-    Serial.printf("Temperature %.2f C %.2f F ", tempSensor.celsius(), tempSensor.fahrenheit());
+// void wetTemp () {
+//   if (tempSensor.read()) {
+//     Serial.printf(" Water Temperature = %.2f F\n", tempSensor.fahrenheit());
+//   }
+// }
+
+void bmeCheck (void) {
+  tempC = bme.readTemperature();
+  tempF = map(tempC,0.0,100.0,32.0,212.0);
+  pressPA = bme.readPressure();
+  pressInHg = (pressPA*0.00029530);
+  relHumid = bme.readHumidity();
+  // Serial.printf("Air Temp = %.2f, Relative Humidity = %.2f, Air Pressure = %.2f InHG\n", tempF, relHumid, pressInHg);
+}
+
+void mqttUpdate (void) {
+  if(mqtt.Update()) {
+      pHfeed.publish(pH);
+      TDSfeed.publish(tdsValue);
+      airTempFeed.publish(tempF);
+      airPressureFeed.publish(pressInHg);
+      airHumidityFeed.publish(relHumid);
   }
+  Serial.printf("Water Temperature = %.2f F\n", tempSensor.fahrenheit());
+  Serial.printf("Water pH = %.3f\n", pH);
+  Serial.print("TDS-Value:");
+  Serial.print(tdsValue, 0);
+  Serial.println("ppm");
+  Serial.printf("Air Temp = %.2f, Relative Humidity = %.2f, Air Pressure = %.2f InHG\n", tempF, relHumid, pressInHg);
+}
+
+void mqttPHdown (void) {
+  bool adjustPH;
+  Adafruit_MQTT_Subscribe *subscription;
+    while ((subscription = mqtt.readSubscription(1000))) {
+      if (subscription == &pHdown) {
+       adjustPH = atof((char *)pHdown.lastread);
+        if (adjustPH) {
+          phPump();
+        }
+    }
+  }
+}
+
+void mqttNutrientAdd (void) {
+  bool addNutrient;
+  Adafruit_MQTT_Subscribe *subscription;
+    while ((subscription = mqtt.readSubscription(1000))) {
+      if (subscription == &nutrientAdd) {
+       addNutrient = atof((char *)nutrientAdd.lastread);
+        if (addNutrient) {
+          nutrientPump();
+        }
+    }
+  }
+}
+
+void phPump (void) {
+  digitalWrite(pHRelayPin, HIGH);
+  delay(1000);
+  digitalWrite(pHRelayPin, LOW);
+  Serial.printf("Added pH Down\n");
+}
+
+void nutrientPump (void) {
+  digitalWrite(nutrientRelayPin, HIGH);
+  delay(1000);
+  digitalWrite(nutrientRelayPin, LOW);
+  Serial.printf("Added Nutrients\n");
+}
+
+
+
+// Function to connect and reconnect as necessary to the MQTT server.
+void MQTT_connect() {
+  int8_t ret;
+  // Stop if already connected.
+  if (mqtt.connected()) {
+    return;
+  }
+  Serial.print("Connecting to MQTT... ");
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+       Serial.printf("%s\n",(char *)mqtt.connectErrorString(ret));
+       Serial.printf("Retrying MQTT connection in 5 seconds..\n");
+       mqtt.disconnect();
+       delay(5000);  // wait 5 seconds
+  }
+  Serial.printf("MQTT Connected!\n");
+}
+
+// Ping MQTT Broker every 2 minutes to keep connection alive
+void mqttPing (void) {
+   if ((millis()-last)>120000) {
+      Serial.printf("Pinging MQTT \n");
+      if(! mqtt.ping()) {
+        Serial.printf("Disconnecting \n");
+        mqtt.disconnect();
+      }
+      last = millis();
+   }
 }
