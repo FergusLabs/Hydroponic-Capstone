@@ -7,14 +7,10 @@
 
 //DEV Branch
 
-#include <spark-dallas-temperature.h>
 #include <OneWire.h>
+#include "DS18.h"
 
-#define ONE_WIRE_BUS 18
-
-OneWire oneWire(ONE_WIRE_BUS);
-
-DallasTemperature TempSensor(&oneWire);
+DS18 tempSensor(18);
 
 const int PHpin = 19;
 const int TDSpin = 17;
@@ -24,13 +20,12 @@ const int TDSpin = 17;
 int analogBuffer[SCOUNT];    // store the analog value in the array, read from ADC
 int analogBufferTemp[SCOUNT];
 int analogBufferIndex = 0, copyIndex = 0;
-float averageVoltage = 0, tdsValue = 0, Celcius = 0, Fahrenheit = 0, temperature = 25;
+float averageVoltage = 0, tdsValue = 0, Celsius = 0, Fahrenheit = 0, temperature = 25;
 
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
 void setup() {
   Serial.begin(9600);
-  TempSensor.begin();
   pinMode(PHpin, INPUT);
   pinMode(TDSpin, INPUT);
 }
@@ -104,10 +99,7 @@ int getMedianNum(int bArray[], int iFilterLen) {
 }
 
 void getTemp () {
-  TempSensor.requestTemperatures(); 
-  Celcius=TempSensor.getTempCByIndex(0);
-  Fahrenheit=TempSensor.toFahrenheit(Celcius);
-  Serial.printf("tempC = %f, tempF = %f\n", Celcius, Fahrenheit);
-  delay(1000);
-
+  if (tempSensor.read()) {
+    Serial.printf("Temperature %.2f C %.2f F ", tempSensor.celsius(), tempSensor.fahrenheit());
+  }
 }
