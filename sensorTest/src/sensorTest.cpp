@@ -28,8 +28,11 @@ void loop();
 void PHsensor ();
 void TDSsensor ();
 int getMedianNum(int bArray[], int iFilterLen);
+void wetTemp ();
 void bmeCheck (void);
 void mqttUpdate (void);
+void amendPh ();
+void amendNutrients ();
 void mqttPHdown (void);
 void mqttNutrientAdd (void);
 void phPump (void);
@@ -64,12 +67,13 @@ int analogBuffer[SCOUNT];
 int analogBufferTemp[SCOUNT];
 int analogBufferIndex = 0, copyIndex = 0;
 float averageVoltage = 0, tdsValue = 0, temperature = 25;
-float tempC, tempF, pressPA, pressInHg, relHumid;
 
+float tempC, tempF, pressPA, pressInHg, relHumid;
+float waterTemp;
 
 float pH;
 
-unsigned long last, lastUpdate;
+unsigned long last, lastUpdate, lastAmend;
 
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
@@ -86,13 +90,20 @@ void loop() {
 
   MQTT_connect();
 
-  //TDSsensor();
+  wetTemp();
+  TDSsensor();
   PHsensor();
-  //bmeCheck();
+  bmeCheck();
 
   if((millis()-lastUpdate)>30000){
     mqttUpdate();
     lastUpdate = millis();
+  }
+
+  if((millis()-lastAmend)>1200000){
+    amendPh();
+    amendNutrients();
+    lastAmend = millis();
   }
 
   mqttPing();
@@ -110,8 +121,8 @@ void PHsensor () { // After seemingly working well yesterday, readings are all o
     sensorSum += sensorValue;
   }
   sensorAverage = sensorSum/SAMPLES;
-  pH = ((0.008*sensorAverage)+24.8);
-  Serial.printf("Water pH = %.3f, pHsensorData = %f\n", pH, sensorAverage);
+  pH = (0.0008*sensorAverage+24.8);
+  //Serial.printf("Water pH = %.3f, pHsensorData = %f\n", pH, sensorAverage);
 }
 
 void TDSsensor () {   // Readings are in range, but need calibration
@@ -137,9 +148,9 @@ void TDSsensor () {   // Readings are in range, but need calibration
     //Serial.print("voltage:");
     //Serial.print(averageVoltage,2);
     //Serial.print("V   ");
-    Serial.print("TDS-Value:");
-    Serial.print(tdsValue, 0);
-    Serial.println("ppm");
+    // Serial.print("TDS-Value:");
+    // Serial.print(tdsValue, 0);
+    // Serial.println("ppm");
   }
 }
 int getMedianNum(int bArray[], int iFilterLen) {
@@ -165,11 +176,12 @@ int getMedianNum(int bArray[], int iFilterLen) {
   return bTemp;
 }
 
-// void wetTemp () {
-//   if (tempSensor.read()) {
-//     Serial.printf(" Water Temperature = %.2f F\n", tempSensor.fahrenheit());
-//   }
-// }
+void wetTemp () {
+  if (tempSensor.read()) {
+    waterTemp = tempSensor.fahrenheit();
+    //Serial.printf(" Water Temperature = %.2f F\n", tempSensor.fahrenheit());
+  }
+}
 
 void bmeCheck (void) {
   tempC = bme.readTemperature();
@@ -184,17 +196,30 @@ void mqttUpdate (void) {
   if(mqtt.Update()) {
       pHfeed.publish(pH);
       TDSfeed.publish(tdsValue);
+      wetTempFeed.publish(waterTemp);
       airTempFeed.publish(tempF);
       airPressureFeed.publish(pressInHg);
       airHumidityFeed.publish(relHumid);
   }
-  Serial.printf("Water Temperature = %.2f F\n", tempSensor.fahrenheit());
-  Serial.printf("Water pH = %.3f\n", pH);
-  Serial.print("TDS-Value:");
+ 
+  Serial.print("Water TDS = ");
   Serial.print(tdsValue, 0);
-  Serial.println("ppm");
-  Serial.printf("Air Temp = %.2f, Relative Humidity = %.2f, Air Pressure = %.2f InHG\n", tempF, relHumid, pressInHg);
+  Serial.print(" ppm, ");
+  Serial.printf("Water pH = %.3f, Water Temperature = %.2f F\n", pH, waterTemp);
+  Serial.printf("Air Temp = %.2f, Relative Humidity = %.2f, Air Pressure = %.2f InHG\n\n", tempF, relHumid, pressInHg);
 }
+
+void amendPh () {
+  if (pH > 6.5) {
+    phPump();
+  }
+}
+
+void amendNutrients () {
+  if (tdsValue < 650) {
+    nutrientPump();
+  }
+} 
 
 void mqttPHdown (void) {
   bool adjustPH;
