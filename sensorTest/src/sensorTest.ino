@@ -49,7 +49,7 @@ float tempC, tempF, pressPA, pressInHg, relHumid;
 
 float pH;
 
-unsigned long last, lastUpdate;
+unsigned long last, lastUpdate, lastAmend;
 
 SYSTEM_MODE(SEMI_AUTOMATIC);
 
@@ -73,6 +73,12 @@ void loop() {
   if((millis()-lastUpdate)>30000){
     mqttUpdate();
     lastUpdate = millis();
+  }
+
+  if((millis()-lastAmend)>1200000){
+    amendPh();
+    amendNutrients();
+    lastAmend = millis();
   }
 
   mqttPing();
@@ -175,6 +181,18 @@ void mqttUpdate (void) {
   Serial.println("ppm");
   Serial.printf("Air Temp = %.2f, Relative Humidity = %.2f, Air Pressure = %.2f InHG\n", tempF, relHumid, pressInHg);
 }
+
+void amendPh () {
+  if (pH > 6.6) {
+    phPump();
+  }
+}
+
+void amendNutrients () {
+  if (tdsValue < 600) {
+    nutrientPump();
+  }
+} 
 
 void mqttPHdown (void) {
   bool adjustPH;
