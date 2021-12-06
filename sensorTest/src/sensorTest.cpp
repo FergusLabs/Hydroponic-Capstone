@@ -46,6 +46,8 @@ const int TDSpin = 17;
 const int pHRelayPin = 10;
 const int nutrientRelayPin = 11;
 
+String DateTime, TimeOnly;
+
 Adafruit_BME280 bme;
 DS18 tempSensor(TempPin);
 TCPClient TheClient; 
@@ -84,29 +86,34 @@ void setup() {
   mqtt.subscribe(&nutrientAdd);
   pinMode(PHpin, INPUT);
   pinMode(TDSpin, INPUT);
+  Time.zone(-7);
+  Particle.syncTime();
   bme.begin();  
 }
+
 void loop() {
 
   MQTT_connect();
+  DateTime = Time.timeStr();
+  TimeOnly = DateTime.substring(11,18);
 
-  wetTemp();
-  TDSsensor();
+  // wetTemp();
+  // TDSsensor();
   PHsensor();
-  bmeCheck();
+  // bmeCheck();
 
-  if((millis()-lastUpdate)>30000){
-    mqttUpdate();
-    lastUpdate = millis();
-  }
+  // if((millis()-lastUpdate)>30000){
+  //   mqttUpdate();
+  //   lastUpdate = millis();
+  // }
 
-  if((millis()-lastAmend)>1200000){
-    amendPh();
-    amendNutrients();
-    lastAmend = millis();
-  }
+  // if((millis()-lastAmend)>1200000){
+  //   amendPh();
+  //   amendNutrients();
+  //   lastAmend = millis();
+  // }
 
-  mqttPing();
+  // mqttPing();
 
 }
 
@@ -121,8 +128,8 @@ void PHsensor () { // After seemingly working well yesterday, readings are all o
     sensorSum += sensorValue;
   }
   sensorAverage = sensorSum/SAMPLES;
-  pH = (0.0008*sensorAverage+24.8);
-  //Serial.printf("Water pH = %.3f, pHsensorData = %f\n", pH, sensorAverage);
+  pH = ((0.0147*sensorAverage)-27.6); // Doing a lot of testing to get this equation right, not coming along very well.
+  Serial.printf("Water pH = %.3f, pHsensorData = %f\n", pH, sensorAverage);
 }
 
 void TDSsensor () {   // Readings are in range, but need calibration
