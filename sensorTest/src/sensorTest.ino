@@ -7,24 +7,33 @@
 
 //DEV Branch
 
-
-
 #include <OneWire.h>
 #include "DS18.h"
 #include <Adafruit_MQTT.h>
 #include "Adafruit_MQTT/Adafruit_MQTT.h" 
 #include "Adafruit_MQTT/Adafruit_MQTT_SPARK.h" 
 #include <Adafruit_BME280.h>
+#include <Adafruit_SSD1306.h>
+#include <Adafruit_GFX.h>
+// #include "DFRobot_EC.h"
+// #include <EEPROM.h>
 #include <credentials.h>
 
-const int PHpin = 19;
+const int PONDPUMP = 8;
+const int PHpin = 17;
 const int TempPin = 18;
-const int TDSpin = 17;
-const int pHRelayPin = 10;
-const int nutrientRelayPin = 11;
+const int TDSpin = 19;
+const int ECpin = 16;
+const int ORPpin = 15;
+const int pHRelayPin = 4;
+const int nutrientRelayPin = 5;
 
 String DateTime, TimeOnly;
 
+Timer pondPumpON(900000, cycleWater);
+
+#define OLED_RESET D3
+Adafruit_SSD1306 display(OLED_RESET);
 Adafruit_BME280 bme;
 DS18 tempSensor(TempPin);
 TCPClient TheClient; 
@@ -61,11 +70,15 @@ void setup() {
   Serial.begin(9600);
   mqtt.subscribe(&pHdown);
   mqtt.subscribe(&nutrientAdd);
+  pinMode(PONDPUMP, OUTPUT);
   pinMode(PHpin, INPUT);
   pinMode(TDSpin, INPUT);
   Time.zone(-7);
   Particle.syncTime();
   bme.begin();  
+  display.begin(SSD1306_SWITCHCAPVCC, 0x3c);
+  display.clearDisplay();
+  display.display();
 }
 
 void loop() {
@@ -74,24 +87,33 @@ void loop() {
   DateTime = Time.timeStr();
   TimeOnly = DateTime.substring(11,18);
 
-  // wetTemp();
-  // TDSsensor();
+  wetTemp();
+  TDSsensor();
   PHsensor();
-  // bmeCheck();
+  bmeCheck();
 
-  // if((millis()-lastUpdate)>30000){
-  //   mqttUpdate();
-  //   lastUpdate = millis();
-  // }
+  if((millis()-lastUpdate)>30000){
+    mqttUpdate();
+    lastUpdate = millis();
+  }
 
-  // if((millis()-lastAmend)>1200000){
-  //   amendPh();
-  //   amendNutrients();
-  //   lastAmend = millis();
-  // }
+  if((millis()-lastAmend)>1200000){
+    amendPh();
+    amendNutrients();
+    lastAmend = millis();
+  }
 
-  // mqttPing();
+  mqttPing();
 
+}
+
+void cycleWater () {
+  long pumpstart;
+  pumpstart = millis();
+  digitalWrite(PONDPUMP, HIGH);
+  if ((millis()-pumpstart)>210000) {
+    digitalWrite(PONDPUMP, LOW);
+  }
 }
 
 void PHsensor () { // After seemingly working well yesterday, readings are all over the place today. 
@@ -174,6 +196,19 @@ void bmeCheck (void) {
   pressInHg = (pressPA*0.00029530);
   relHumid = bme.readHumidity();
   // Serial.printf("Air Temp = %.2f, Relative Humidity = %.2f, Air Pressure = %.2f InHG\n", tempF, relHumid, pressInHg);
+}
+
+void oledShow (void) {
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0,0);
+  display.print("Water TDS = ");
+  display.print(tdsValue, 0);
+  display.print(" ppm,\n");
+  display.printf("Water pH = %.3f\n, Water Temperature = %.2f F\n", pH, waterTemp);
+  display.printf("Air Temp = %.2f\n, Relative Humidity = %.2f\n, Air Pressure = %.2f InHG\n", tempF, relHumid, pressInHg);
+  display.display();
 }
 
 void mqttUpdate (void) {
